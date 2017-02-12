@@ -16,9 +16,7 @@ from blocks import relu_block, res_block, deconv_block, conv_block, dense_block
 
 logging.basicConfig(format='%(asctime)s %(message)s', level=logging.INFO)
 
-# TODO Download all images
 # TODO Start making hyperparameters command line options
-# TODO Check that things match with paper
 # TODO Randomize train/test/validation sets (seed)
 
 class Loader(object):
@@ -57,7 +55,7 @@ class GAN(object):
         self.is_training = tf.placeholder(tf.bool, shape=[])
         self.test_images = None
 
-    def build_model(self, use_fft=False, input_images=None):
+    def build_model(self, input_images=None):
         if input_images is not None:
             with tf.variable_scope("G", reuse=True) as scope:
                 self.test_images = tf.placeholder(tf.float32, input_images.shape)
@@ -68,14 +66,9 @@ class GAN(object):
                 self.G = self.generator(reuse=False)
 
             with tf.variable_scope("D") as scope:
-                if use_fft:
-                    self.D = self.fft_discriminator(self.d_images)
-                    scope.reuse_variables()
-                    self.DG = self.fft_discriminator(self.G)
-                else:
-                    self.D = self.discriminator(self.d_images, reuse=False)
-                    scope.reuse_variables()
-                    self.DG = self.discriminator(self.G, reuse=True)
+                self.D = self.discriminator(self.d_images, reuse=False)
+                scope.reuse_variables()
+                self.DG = self.discriminator(self.G, reuse=True)
 
             # MSE Loss and Adversarial Loss for G
             self.mse_loss = tf.reduce_mean(
@@ -136,17 +129,6 @@ class GAN(object):
         with tf.variable_scope("conv2"):
             h = conv_block(h, output_channels=3, reuse=reuse)
 
-        return h
-
-    def fft_discriminator(self, inp):
-        scaled_inp = inp / 256
-        shuffled_inp = tf.transpose(scaled_inp, perm=[0, 3, 1, 2])
-        inp_fft = tf.fft2d(tf.cast(shuffled_inp, tf.complex64))
-        amp = tf.complex_abs(inp_fft)
-        with tf.variable_scope("fft_dense1"):
-            h = dense_block(amp, leaky_relu=True, output_size=1024)
-        with tf.variable_scope("fft_dense2"):
-            h = dense_block(h, output_size=1)
         return h
 
     def discriminator(self, inp, reuse=False):
@@ -248,7 +230,7 @@ class SuperRes(object):
         self.train_batch, self.val_batch, self.test_batch = loader.batch()
 
         self.GAN = GAN()
-        self.GAN.build_model(use_fft=False)
+        self.GAN.build_model()
 
         self.g_mse_optim = (tf.train.AdamOptimizer(cfg.LEARNING_RATE, beta1=cfg.BETA_1)
             .minimize(self.GAN.mse_loss, var_list=self.GAN.g_vars))
@@ -294,32 +276,6 @@ class SuperRes(object):
             toimage(bicubic, cmin=0., cmax=255.).save(output_name + '_bc.JPEG')
             toimage(hr, cmin=0., cmax=255.).save(output_name + '_hr.JPEG')
             toimage(sr, cmin=0., cmax=255.).save(output_name + '_sr.JPEG')
-
-    def predict_all_2x(self, file_list, output_directory, scale, init_vars=False):
-        if init_vars == True:
-            self._load_latest_checkpoint_or_initialize(tf.train.Saver())
-        batch_size = 50
-        test_GAN = GAN()
-        test_GAN.build_model(input_images=np.zeros((batch_size, int(cfg.CROP_HEIGHT/scale), int(cfg.CROP_WIDTH/scale), 3)))
-        for i, image_file in enumerate(file_list):
-            if not i % batch_size:
-                images = []
-            with Image.open(image_file) as image:
-                lr = np.asarray(image, dtype=np.uint8)
-                image_name = image_file.split("/")[-1]
-                images.append(lr)
-            if not (i + 1) % batch_size:
-                images = np.array(images)
-                sr = self.sess.run(
-                    [test_GAN.G],
-                    feed_dict={
-                        test_GAN.test_images: images,
-                        test_GAN.is_training: False
-                })
-                sr = sr[0]
-                for j, image in enumerate(sr):
-                    image = np.maximum(np.minimum(image, 255.0), 0.0)
-                    toimage(image, cmin=0., cmax=255.).save(output_directory + file_list[j].split("/")[-1])
 
     def _load_latest_checkpoint_or_initialize(self, saver, attempt_load=True):
         if cfg.WEIGHTS:
@@ -500,25 +456,7 @@ class SuperRes(object):
             coord.request_stop()
             coord.join(threads)
 
-def save_truth_images(file_list, output_directory):
-    for image_file in file_list:
-        with Image.open(image_file) as image:
-            hr = np.asarray(image, dtype=np.uint8)
-            x, y = hr.shape[0:2]
-            if x >= cfg.CROP_HEIGHT and y >= cfg.CROP_WIDTH:
-                image_name = image_file.split("/")[-1]
-                hr = hr[0:cfg.CROP_HEIGHT, 0:cfg.CROP_WIDTH]
-                hr_image = Image.fromarray(hr)
-                hr_image.save(output_directory + "/truth4x/" + image_name)
-                    
-                lr2x = imresize(hr, 100 // 4, interp='bicubic')
-                lr2x_image = Image.fromarray(lr2x)
-                lr2x_image.save(output_directory + "/truth2x/" + image_name)
-                    
-                lr4x = imresize(lr2x, 100 // 2, interp='bicubic')
-                lr4x_image = Image.fromarray(lr4x)
-                lr4x_image.save(output_directory + "/truth/" + image_name)
- 
+
 def main():
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
@@ -533,11 +471,6 @@ def main():
     val_images = file_list[cfg.NUM_TRAIN_IMAGES:cfg.NUM_TRAIN_IMAGES + cfg.NUM_VAL_IMAGES]
     test_images = file_list[cfg.NUM_TRAIN_IMAGES + cfg.NUM_VAL_IMAGES:]
 
-    truth_list = glob.glob(cfg.OUTPUT_DIR + "/truth/*")
-    truth2x_list = glob.glob(cfg.OUTPUT_DIR + "/truth2x/*")
-    truth4x_list = glob.glob(cfg.OUTPUT_DIR + "/truth4x/*")
-    sr2x_list = glob.glob(cfg.OUTPUT_DIR + "/sr2x/*")
-
     loader = Loader(train_images, val_images, test_images)
     model = SuperRes(sess, loader)
 
@@ -547,14 +480,8 @@ def main():
         "/home/images/imagenet/n00007846_80134.JPEG"
     ]
     OUT_FILE = "images/test_{i}"
-    
-    if cfg.SAVE_TRUTH:
-        save_truth_images(file_list, cfg.OUTPUT_DIR)
-    elif cfg.PREDICT_4X:
-        model.predict_all_2x(sr2x_list, cfg.OUTPUT_DIR + "/sr4x/", 2, init_vars=True)
-    elif cfg.PREDICT_2X:
-        model.predict_all_2x(truth_list, cfg.OUTPUT_DIR + "/sr2x/", 4, init_vars=True)
-    elif cfg.PREDICT_ONLY:
+
+    if cfg.PREDICT_ONLY:
         for i, img in enumerate(TEST_IMGS):
             out_file = OUT_FILE.replace("{i}", str(i))
             model.predict(img, out_file, init_vars=True)
@@ -572,11 +499,8 @@ if __name__ == '__main__':
     parser.add_argument('--mem', type=float)
     parser.add_argument('--use-ckpt', action="store_true")
     parser.add_argument('--no-ckpt', action="store_true")
-    parser.add_argument('--save-truth', action="store_true")
     parser.add_argument('--pretrain-only', action="store_true")
     parser.add_argument('--predict-only', action="store_true")
-    parser.add_argument('--predict-4x', action="store_true")
-    parser.add_argument('--predict-2x', action="store_true")
     parser.add_argument('--weights', type=str)
     parser.add_argument('--max-files', type=int)
 
@@ -591,16 +515,10 @@ if __name__ == '__main__':
         cfg.USE_CHECKPOINT = False
     if args.max_files:
         cfg.MAX_FILES = args.max_files
-    if args.save_truth:
-        cfg.SAVE_TRUTH = True
     if args.pretrain_only:
         cfg.PRETRAIN_ONLY = True
     if args.predict_only:
         cfg.PREDICT_ONLY = True
-    if args.predict_4x:
-        cfg.PREDICT_4X = True
-    if args.predict_2x:
-        cfg.PREDICT_2X = True
     if args.mem:
         cfg.MEM_FRAC = args.mem
     if args.weights:
