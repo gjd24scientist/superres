@@ -28,7 +28,7 @@ def res_block(inp, is_training_cond, reuse=False):
     with tf.variable_scope("resconv2"):
         h = conv_block(h, bn=True, is_training_cond=is_training_cond, reuse=reuse)
 
-    return inp + h
+    return tf.nn.relu(inp + h)
 
 def deconv_block(inp, relu=True, output_channels=64):
     """

@@ -264,30 +264,36 @@ class SuperRes(object):
     def predict(self, input_name, output_name, init_vars=False):
         if init_vars == True:
             self._load_latest_checkpoint_or_initialize(tf.train.Saver())
-        image = Image.open(input_name)
-        hr = np.asarray(image, dtype=np.uint8)
-        w = hr.shape[0] - hr.shape[0] % 4
-        h = hr.shape[1] - hr.shape[1] % 4
-        hr = hr[:w,:h]
-        lr = imresize(hr, 100 // cfg.r, interp='bicubic')
-        bicubic = imresize(lr, cfg.r * 100, interp='bicubic')
-        image = np.reshape(lr, (1,) + lr.shape)
-        test_GAN = GAN()
-        test_GAN.build_model(input_images=image)
-        sr = self.sess.run(
-            [test_GAN.G],
-            feed_dict={
-                test_GAN.test_images: image,
-                test_GAN.is_training: False
-        })
-        sr = np.maximum(np.minimum(sr[0][0], 255.0), 0.0)
 
-        logging.info("SSIM - Bicubic %f, SR %f", ssim(bicubic, hr), ssim(sr, hr))
+        with Image.open(input_name) as image:
+            hr = np.asarray(image, dtype=np.uint8)
+            w = hr.shape[0] - hr.shape[0] % 4
+            h = hr.shape[1] - hr.shape[1] % 4
+            hr = hr[:w,:h]
+            lr = imresize(hr, 100 // cfg.r, interp='bicubic')
+            bicubic = imresize(lr, cfg.r * 100, interp='bicubic')
+            image = np.reshape(lr, (1,) + lr.shape)
+            test_GAN = GAN()
+            test_GAN.build_model(input_images=image)
+            sr, loss = self.sess.run(
+                [test_GAN.G, test_GAN.mse_loss],
+                feed_dict={
+                    test_GAN.test_images: image,
+                    test_GAN.is_training: False
+            })
+            sr = np.maximum(np.minimum(sr[0][0], 255.0), 0.0)
+            print(bicubic.shape)
+            print(hr.shape)
+            bicubic_loss = np.mean(np.square((bicubic - hr)))
+            logging.info("MSE Loss: %f", loss)
+            logging.info("Bicubic MSE Loss: %f", bicubic_loss)
 
-        toimage(lr, cmin=0., cmax=255.).save(output_name + '_lr.JPEG')
-        toimage(bicubic, cmin=0., cmax=255.).save(output_name + '_bc.JPEG')
-        toimage(hr, cmin=0., cmax=255.).save(output_name + '_hr.JPEG')
-        toimage(sr, cmin=0., cmax=255.).save(output_name + '_sr.JPEG')
+            logging.info("SSIM - Bicubic %f, SR %f", ssim(bicubic, hr), ssim(sr, hr))
+
+            toimage(lr, cmin=0., cmax=255.).save(output_name + '_lr.JPEG')
+            toimage(bicubic, cmin=0., cmax=255.).save(output_name + '_bc.JPEG')
+            toimage(hr, cmin=0., cmax=255.).save(output_name + '_hr.JPEG')
+            toimage(sr, cmin=0., cmax=255.).save(output_name + '_sr.JPEG')
 
     def predict_all_2x(self, file_list, output_directory, scale, init_vars=False):
         if init_vars == True:

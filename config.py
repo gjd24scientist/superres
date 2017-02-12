@@ -1,4 +1,4 @@
-IMAGES = "/home/images/tmp/*"
+IMAGES = "/home/images/all/*"
 OUTPUT_DIR = "/home/images/2x/"
 LOGS_DIR = "logs/"
 CHECKPOINT = "checkpoint/weights"
@@ -6,13 +6,13 @@ USE_CHECKPOINT = True
 
 HR_HEIGHT = 96
 HR_WIDTH = 96
-r = 2
+r = 4
 LR_HEIGHT = HR_HEIGHT // r
 LR_WIDTH = HR_WIDTH // r
 NUM_CHANNELS = 3
 BATCH_SIZE = 32
-NUM_PRETRAIN_EPOCHS = 200
-NUM_TRAIN_EPOCHS = 150
+NUM_PRETRAIN_EPOCHS = 120
+NUM_TRAIN_EPOCHS = 25
 TRAIN_RATIO = .7
 VAL_RATIO = .2
 PRETRAIN_ONLY = False
